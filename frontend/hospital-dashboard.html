@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Hospital Emergency Dashboard</title>
+  <style>
+    body {
+      font-family: Arial;
+      background: #f4f6f8;
+      text-align: center;
+      padding-top: 30px;
+    }
+    .card {
+      width: 420px;
+      margin: auto;
+      padding: 20px;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 0 12px rgba(0,0,0,0.15);
+    }
+    .incoming { color: red; font-weight: bold; }
+    .ack { color: orange; font-weight: bold; }
+    .idle { color: green; }
+    button {
+      padding: 10px 18px;
+      font-size: 14px;
+      margin-top: 15px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<h2>🏥 Hospital Emergency Dashboard</h2>
+
+<div class="card">
+  <p id="status" class="idle">No active emergencies</p>
+  <p id="details"></p>
+  <p id="eta"></p>
+
+  <button id="ackBtn" onclick="acknowledge()" style="display:none;">
+    ACKNOWLEDGE & PREPARE ER
+  </button>
+</div>
+
+<script>
+let etaInterval = null;
+
+async function updateHospitalAlert() {
+  const res = await fetch("http://127.0.0.1:8000/hospital/alert");
+  const data = await res.json();
+
+  const status = document.getElementById("status");
+  const details = document.getElementById("details");
+  const eta = document.getElementById("eta");
+  const ackBtn = document.getElementById("ackBtn");
+
+  if (data.status === "INCOMING") {
+    status.className = "incoming";
+    status.innerText = "🚑 AMBULANCE INCOMING";
+
+    details.innerHTML = `
+      <b>Emergency:</b> ${data.emergency_type}<br>
+      <b>Severity:</b> ${data.severity}
+    `;
+
+    startETA(data.eta_seconds);
+    ackBtn.style.display = "inline-block";
+  }
+  else if (data.status === "ACKNOWLEDGED") {
+    status.className = "ack";
+    status.innerText = "🟡 ER PREPARATION IN PROGRESS";
+    ackBtn.style.display = "none";
+  }
+  else {
+    status.className = "idle";
+    status.innerText = "No active emergencies";
+    details.innerHTML = "";
+    eta.innerText = "";
+    ackBtn.style.display = "none";
+    stopETA();
+  }
+}
+
+function startETA(seconds) {
+  let remaining = seconds;
+  stopETA();
+
+  etaInterval = setInterval(() => {
+    if (remaining <= 0) {
+      eta.innerText = "Ambulance arriving now";
+      stopETA();
+      return;
+    }
+    const min = Math.floor(remaining / 60);
+    const sec = remaining % 60;
+    eta.innerText = `ETA: ${min}:${sec.toString().padStart(2, "0")}`;
+    remaining--;
+  }, 1000);
+}
+
+function stopETA() {
+  if (etaInterval) {
+    clearInterval(etaInterval);
+    etaInterval = null;
+  }
+}
+
+async function acknowledge() {
+  await fetch("http://127.0.0.1:8000/hospital/acknowledge", {
+    method: "POST"
+  });
+}
+
+setInterval(updateHospitalAlert, 1000);
+</script>
+
+</body>
+</html>

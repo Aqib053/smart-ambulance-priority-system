@@ -1,0 +1,8 @@
+path: /Users/aqib/smart-ambulance/detection/dataset
+
+train: train/images
+val: train/images
+
+nc: 1
+names:
+  - ambulance

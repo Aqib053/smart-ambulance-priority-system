@@ -1,0 +1,16 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# YOLO / Training
+runs/
+datasets/
+
+# OS
+.DS_Store
+
+# Large model files (optional)
+*.pt
+

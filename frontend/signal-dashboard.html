@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Traffic Signal Dashboard</title>
+  <style>
+    body {
+      font-family: Arial;
+      text-align: center;
+      margin-top: 40px;
+    }
+    .signal {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      margin: auto;
+      background: red;
+    }
+    .green { background: green; }
+    .red { background: red; }
+  </style>
+</head>
+<body>
+
+<h2>🚦 Traffic Signal – SIG_01</h2>
+<div id="signal" class="signal red"></div>
+<p id="status">Status: RED</p>
+
+<script>
+async function updateSignal() {
+  const res = await fetch("http://127.0.0.1:8000/signal/state");
+  const data = await res.json();
+
+  const signal = document.getElementById("signal");
+  const status = document.getElementById("status");
+
+  if (data.SIG_01 === "GREEN") {
+    signal.className = "signal green";
+    status.innerText = "Status: GREEN";
+  } else {
+    signal.className = "signal red";
+    status.innerText = "Status: RED";
+  }
+}
+
+setInterval(updateSignal, 1000);
+</script>
+
+</body>
+</html>
