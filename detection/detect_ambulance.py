@@ -1,105 +1,114 @@
-from ultralytics import YOLO
 import cv2
-import requests
 import time
+import os
+import requests
+from ultralytics import YOLO
+from requests.exceptions import RequestException
 
-# ---------------- LOAD CUSTOM MODEL ----------------
-model = YOLO("ambulance_best.pt")
-
-# ---------------- CAMERA ----------------
-cap = cv2.VideoCapture(0)
-
-# ---------------- BACKEND ----------------
+# ---------------- CONFIG ----------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "models", "ambulance_best.pt")
 BACKEND_URL = "http://127.0.0.1:8000/ambulance/detected"
+SIGNAL_ID = "SIG_01"
 
-# ---------------- CONTROL PARAMETERS ----------------
-CONF_THRESHOLD = 0.55          # higher confidence
-MIN_BOX_AREA = 25000           # ignore small objects (phones/hands)
-ASPECT_MIN = 1.6               # ambulance-like rectangle
-ASPECT_MAX = 3.8
-DETECTION_TIME = 2.5           # seconds object must stay visible
-TRIGGER_COOLDOWN = 20           # seconds between triggers
+CONF_THRESHOLD = 0.55
+COOLDOWN_SECONDS = 15
+CAMERA_INDEX = 0
+# ---------------------------------------
 
-last_trigger = 0
-detection_start = None
 
-print("🚦 Ambulance detection system started")
+# ---------- Model Check ----------
+if not os.path.exists(MODEL_PATH):
+    raise FileNotFoundError(
+        "\n❌ YOLO model not found.\n"
+        "➡ Please download 'ambulance_best.pt'\n"
+        "➡ Place it inside: detection/models/\n"
+    )
 
-# ---------------- MAIN LOOP ----------------
+print("✅ YOLO model found. Loading model...")
+model = YOLO(MODEL_PATH)
+
+
+# ---------- Camera Check ----------
+cap = cv2.VideoCapture(CAMERA_INDEX)
+if not cap.isOpened():
+    print("❌ Camera not available. Please check camera connection.")
+    exit(1)
+
+print("📷 Camera initialized successfully")
+
+
+# ---------- Runtime State ----------
+last_trigger_time = 0
+
+
+# ---------- Main Loop ----------
 while True:
     ret, frame = cap.read()
     if not ret:
+        print("⚠️ Failed to read frame from camera")
         break
 
-    frame_h, frame_w = frame.shape[:2]
-    frame_area = frame_h * frame_w
+    ambulance_detected = False
 
-    results = model(frame, conf=CONF_THRESHOLD, verbose=False)
+    # Run inference
+    try:
+        results = model(frame, conf=CONF_THRESHOLD, verbose=False)
+    except Exception as e:
+        print("❌ Model inference failed:", e)
+        continue
 
-    ambulance_confirmed = False
-
-    for r in results:
-        if r.boxes is None:
+    # Parse results
+    for result in results:
+        if result.boxes is None:
             continue
 
-        for box in r.boxes:
-            cls = int(box.cls[0])
-            conf = float(box.conf[0])
+        for box in result.boxes:
+            class_id = int(box.cls[0])
 
-            # Only ambulance class
-            if cls != 0:
-                continue
+            # Class 0 → ambulance (single-class model)
+            if class_id == 0:
+                ambulance_detected = True
 
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            width = x2 - x1
-            height = y2 - y1
-            area = width * height
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(
+                    frame,
+                    "AMBULANCE",
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 0),
+                    2,
+                )
 
-            # ---------------- FILTER 1: SIZE ----------------
-            if area < MIN_BOX_AREA:
-                continue
-
-            # ---------------- FILTER 2: DISTANCE ----------------
-            if area < 0.12 * frame_area:
-                continue
-
-            # ---------------- FILTER 3: SHAPE ----------------
-            aspect_ratio = width / height
-            if not (ASPECT_MIN <= aspect_ratio <= ASPECT_MAX):
-                continue
-
-            # ---------------- PASSED ALL FILTERS ----------------
-            ambulance_confirmed = True
-
-            # Draw bounding box
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            label = f"AMBULANCE {conf:.2f}"
-            cv2.putText(
-                frame, label, (x1, y1 - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
+    # ---------- Trigger Backend ----------
+    current_time = time.time()
+    if ambulance_detected and (current_time - last_trigger_time) > COOLDOWN_SECONDS:
+        try:
+            response = requests.post(
+                BACKEND_URL,
+                json={"signal_id": SIGNAL_ID},
+                timeout=3
             )
 
-    # ---------------- TIME-BASED CONFIRMATION ----------------
-    if ambulance_confirmed:
-        if detection_start is None:
-            detection_start = time.time()
-        elif time.time() - detection_start >= DETECTION_TIME:
-            if time.time() - last_trigger >= TRIGGER_COOLDOWN:
-                print("🚑 Confirmed ambulance → Triggering signal")
-                try:
-                    requests.post(BACKEND_URL, json={"signal_id": "SIG_01"})
-                except:
-                    print("⚠️ Backend not reachable")
+            if response.status_code == 200:
+                print("🚑 Ambulance confirmed → Signal triggered")
+                last_trigger_time = current_time
+            else:
+                print("⚠️ Backend rejected request:", response.text)
 
-                last_trigger = time.time()
-                detection_start = None
-    else:
-        detection_start = None
+        except RequestException as e:
+            print("❌ Failed to contact backend:", e)
 
-    cv2.imshow("Ambulance Detection (Precision Filtered)", frame)
+    # ---------- Display ----------
+    cv2.imshow("Smart Ambulance Detection", frame)
 
     if cv2.waitKey(1) & 0xFF == ord("q"):
+        print("👋 Exiting detection")
         break
 
+
+# ---------- Cleanup ----------
 cap.release()
 cv2.destroyAllWindows()
